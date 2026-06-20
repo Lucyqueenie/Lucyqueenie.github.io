@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>跑得快</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+    body {
+        margin:0;
+        background: #1a1a2e;
+        overflow: hidden;
+        font-family: 'Press Start 2P', 'Courier New', monospace;
+    }
+
+    canvas {
+        display: block;
+        margin: auto;
+        image-rendering: pixelated;
+    }
+
+    #hud {
+        position: fixed;
+        top: 10px;
+        right: 20px;
+        color: #ff4444;
+        font-size: 16px;
+        padding: 8px 14px;
+        z-index: 10;
+        text-align: right;
+    }
+
+    #hud div {
+        margin-bottom: 6px;
+    }
+
+    #startOverlay {
+        display: flex;
+        position: fixed;
+        top:0; left:0;
+        width: 100vw; height: 100vh;
+        background: rgba(0,0,0,0.75);
+        z-index: 100;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+    }
+
+    #startOverlay .title {
+        color: #ff4444;
+        font-size: 36px;
+        margin-bottom: 20px;
+        text-shadow: 3px 3px 0 #000;
+    }
+
+    #startOverlay .subtitle {
+        color: #ff6666;
+        font-size: 14px;
+        margin-bottom: 10px;
+    }
+
+    #startBtn {
+        margin-top: 30px;
+        padding: 14px 36px;
+        font-size: 20px;
+        font-family: 'Press Start 2P', 'Courier New', monospace;
+        color: #fff;
+        background: #cc2222;
+        border: 3px solid #ff4444;
+        cursor: pointer;
+        box-shadow: 0 0 15px rgba(255,50,50,0.6);
+        transition: all 0.15s;
+    }
+
+    #startBtn:hover {
+        background: #ff4444;
+        box-shadow: 0 0 25px rgba(255,50,50,0.9);
+        transform: scale(1.05);
+    }
+
+    #startBtn:active {
+        transform: scale(0.95);
+        background: #aa1111;
+    }
+
+    #gameOverOverlay {
+        display: none;
+        position: fixed;
+        top:0; left:0;
+        width: 100vw; height: 100vh;
+        background: rgba(0,0,0,0.75);
+        z-index: 100;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+    }
+
+    #gameOverOverlay .title {
+        color: #ff4444;
+        font-size: 32px;
+        margin-bottom: 20px;
+        text-shadow: 2px 2px 0 #000;
+    }
+
+    #gameOverOverlay .info {
+        color: #ff6666;
+        font-size: 14px;
+        margin-bottom: 8px;
+    }
+
+    #restartBtn {
+        margin-top: 30px;
+        padding: 12px 30px;
+        font-size: 18px;
+        font-family: 'Press Start 2P', 'Courier New', monospace;
+        color: #fff;
+        background: #cc2222;
+        border: 3px solid #ff4444;
+        cursor: pointer;
+        box-shadow: 0 0 10px rgba(255,50,50,0.5);
+        transition: all 0.15s;
+    }
+
+    #restartBtn:hover {
+        background: #ff4444;
+        box-shadow: 0 0 20px rgba(255,50,50,0.8);
+    }
+
+    #restartBtn:active {
+        transform: scale(0.95);
+        background: #aa1111;
+    }
+</style>
+</head>
+
+<body>
+
+<div id="hud">
+    <div id="survivalTime">时间：0.0 秒</div>
+    <div id="treasureCount">宝箱：0</div>
+    <div id="speedStatus">速度：正常</div>
+</div>
+
+<div id="startOverlay">
+    <div class="title">跑得快</div>
+    <div class="subtitle">像素风跑酷游戏</div>
+    <button id="startBtn">开始游戏</button>
+</div>
+
+<div id="gameOverOverlay">
+    <div class="title">游戏结束</div>
+    <div class="info" id="currentTime">本次存活：0.0 秒</div>
+    <div class="info" id="currentTreasures">本次宝箱：0</div>
+    <div class="info" id="bestScore">最长存活：0.0 秒</div>
+    <div class="info" id="bestTreasures">最多宝箱：0</div>
+    <button id="restartBtn">重新开始</button>
+</div>
+
+<canvas id="game" width="800" height="400"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const timeText = document.getElementById("survivalTime");
+const treasureText = document.getElementById("treasureCount");
+const speedStatus = document.getElementById("speedStatus");
+const startOverlay = document.getElementById("startOverlay");
+const startBtn = document.getElementById("startBtn");
+const gameOverOverlay = document.getElementById("gameOverOverlay");
+const currentTimeEl = document.getElementById("currentTime");
+const currentTreasuresEl = document.getElementById("currentTreasures");
+const bestScoreEl = document.getElementById("bestScore");
+const bestTreasuresEl = document.getElementById("bestTreasures");
+const restartBtn = document.getElementById("restartBtn");
+
+let gameRunning = false;
+let survivalTime = 0;
+let speed = 2;
+let treasureCount = 0;
+
+/* =========================
+   ✅ 加速系统
+   ========================= */
+let isSprinting = false;          // 是否加速
+const NORMAL_SPEED = 2.5;       // 正常速度
+const SPRINT_SPEED = 5.0;       // 加速速度
+
+function getMoveSpeed() {
+    return isSprinting ? SPRINT_SPEED : NORMAL_SPEED;
+}
+
+function updateSpeedStatus() {
+    speedStatus.innerText = isSprinting ? "速度：加速 🔥" : "速度：正常";
+}
+
+/* =========================
+   摄像机
+========================= */
+let cameraX = 0;
+
+function getScreenX(worldX) {
+    return worldX - cameraX;
+}
+
+/* =========================
+   背景
+========================= */
+let skyGrad = null;
+function initSky() {
+    skyGrad = ctx.createLinearGradient(0, 0, 0, 300);
+    skyGrad.addColorStop(0, "#1a1a2e");
+    skyGrad.addColorStop(0.5, "#16213e");
+    skyGrad.addColorStop(1, "#0f3460");
+}
+
+const stars = [];
+for (let i = 0; i < 50; i++) {
+    stars.push({
+        x: Math.random() * 3200,
+        y: Math.random() * 200,
+        size: Math.random() * 2 + 1,
+        blink: Math.random() * 100
+    });
+}
+
+const clouds = [
+    { x:0, y: 60, w: 60, h: 20 },
+    { x: 600, y: 90, w: 80, h: 25 },
+    { x: 1200, y: 50, w: 50, h: 18 },
+    { x: 2000, y: 100, w: 70, h: 22 },
+    { x: 2600, y: 70, w: 55, h: 19 }
+];
+
+const hills = [
+    { x:0, y: 250, w: 400, h: 80 },
+    { x: 700, y: 270, w: 300, h: 60 },
+    { x: 1400, y: 240, w: 500, h: 100 },
+    { x: 2400, y: 260, w: 400, h: 70 }
+];
+
+const TILE = 20;
+const groundY = 330;
+
+function drawPixelBackground() {
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let s of stars) {
+        s.blink += 0.02;
+        let alpha = 0.5 + 0.5 * Math.sin(s.blink);
+        ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+        let sx = ((s.x - cameraX * 0.1) % 3200 + 3200) % 3200;
+        if (sx > canvas.width) sx -= 3200;
+        ctx.fillRect(sx, s.y, s.size, s.size);
+    }
+
+    for (let c of clouds) {
+        let cx = ((c.x - cameraX * 0.3) % 3200 + 3200) % 3200;
+        if (cx > canvas.width) cx -= 3200;
+        ctx.fillStyle = "rgba(255,255,255,0.15)";
+        ctx.fillRect(cx, c.y, c.w, c.h);
+    }
+
+    for (let h of hills) {
+        let hx = ((h.x - cameraX * 0.5) % 3200 + 3200) % 3200;
+        if (hx > canvas.width) hx -= 3200;
+        ctx.fillStyle = "#1a3a5c";
+        ctx.fillRect(hx, h.y, h.w, h.h);
+    }
+
+    let groundScreenX = (-cameraX) % TILE;
+    for (let gx = groundScreenX; gx < canvas.width + TILE; gx += TILE) {
+        for (let row = 0; row < 3; row++) {
+            let gy = groundY + row * TILE;
+            if (gy >= canvas.height) break;
+            let type = row === 0 ? "#4a8c3f" : (row === 1 ? "#8B6914" : "#5a3a0a");
+            ctx.fillStyle = type;
+            ctx.fillRect(gx, gy, TILE, TILE);
+        }
+    }
+}
+
+/* =========================
+   像素人物
+========================= */
+let player = {
+    x: 400,
+    y: 280,
+    width: 30,
+    height: 50,
+    vy: 0
+};
+
+let jumpCount = 0;
+let moveDir = 0;
+let frame = 0;
+let frameTimer = 0;
+
+function drawPlayer() {
+    let sx = getScreenX(player.x);
+    let sy = player.y;
+
+    ctx.save();
+    ctx.translate(sx + 15, sy + 50);
+
+    ctx.fillStyle = "#e94560";
+    ctx.fillRect(-8, -35, 16, 25);
+
+    ctx.fillStyle = "#ffcc99";
+    ctx.beginPath();
+    ctx.arc(0, -40, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#1a1a2e";
+    ctx.fillRect(-4, -43, 3, 3);
+    ctx.fillRect(2, -43, 3, 3);
+
+    ctx.fillStyle = "#0f3460";
+    if (jumpCount > 0) {
+        ctx.fillRect(-7, -14, 5, 10);
+        ctx.fillRect(3, -14, 5, 10);
+    } else if (moveDir !== 0) {
+        frameTimer++;
+        if (frameTimer > 6) {
+            frame = (frame + 1) % 3;
+            frameTimer = 0;
+        }
+        if (frame === 0) {
+            ctx.fillRect(-6, -10, 5, 12);
+            ctx.fillRect(2, -10, 5, 12);
+        } else if (frame === 1) {
+            ctx.fillRect(-7, -10, 5, 12);
+            ctx.fillRect(3, -12, 5, 14);
+        } else {
+            ctx.fillRect(-3, -12, 5, 14);
+            ctx.fillRect(5, -10, 5, 12);
+        }
+    } else {
+        ctx.fillRect(-6, -10, 5, 12);
+        ctx.fillRect(2, -10, 5, 12);
+    }
+
+    ctx.fillStyle = "#ffcc99";
+    ctx.fillRect(-12, -30, 5, 10);
+    ctx.fillRect(8, -30, 5, 10);
+
+    ctx.restore();
+}
+
+/* =========================
+   石头平台
+========================= */
+function drawStonePlatform(x, y, w, h) {
+    let sx = getScreenX(x);
+    ctx.fillStyle = "#7a7a7a";
+    ctx.fillRect(sx, y, w, h);
+    ctx.strokeStyle = "#5a5a5a";
+    ctx.strokeRect(sx, y, w, h);
+    ctx.fillStyle = "#9a9a9a";
+    ctx.fillRect(sx + 2, y + 1, w - 4, 3);
+}
+
+/* =========================
+   岩石类型系统
+========================= */
+const ROCK_TYPE = {
+    SMALL: "small",
+    LARGE: "large",
+    SPIKED: "spiked",
+    CRUMBLING: "crumbling",
+    MOVING: "moving"
+};
+
+function getRockProperties(type) {
+    switch(type) {
+        case ROCK_TYPE.SMALL:
+            return { width: 14 + Math.random() * 8, height: 10 + Math.random() * 6, color: "#555", detailColor: "#777" };
+        case ROCK_TYPE.LARGE:
+            return { width: 12 + Math.random() * 6, height: 18 + Math.random() * 10, color: "#444", detailColor: "#666" };
+        case ROCK_TYPE.SPIKED:
+            return { width: 16 + Math.random() * 10, height: 14 + Math.random() * 8, color: "#5a3a0a", detailColor: "#7a5a1a" };
+        case ROCK_TYPE.CRUMBLING:
+            return { width: 16 + Math.random() * 10, height: 12 + Math.random() * 8, color: "#6a5a3a", detailColor: "#8a7a4a" };
+        case ROCK_TYPE.MOVING:
+            return { width: 14 + Math.random() * 8, height: 12 + Math.random() * 8, color: "#556655", detailColor: "#778877" };
+        default:
+            return { width: 14, height: 12, color: "#555", detailColor: "#777" };
+    }
+}
+
+function drawRock(x, y, w, h, type, timer) {
+    let sx = getScreenX(x);
+    let props = getRockProperties(type);
+
+    ctx.fillStyle = props.color;
+    ctx.fillRect(sx, y, w, h);
+    ctx.strokeStyle = props.detailColor;
+    ctx.strokeRect(sx, y, w, h);
+
+    ctx.fillStyle = props.detailColor;
+    ctx.fillRect(sx + 2, y + 1, w - 4, 2);
+
+    if (type === ROCK_TYPE.SMALL) {
+        ctx.fillStyle = "#888";
+        ctx.fillRect(sx + 3, y + 3, 2, 2);
+        ctx.fillRect(sx + w - 6, y + 4, 2, 2);
+    }
+
+    if (type === ROCK_TYPE.LARGE) {
+        ctx.fillStyle = "#555";
+        ctx.fillRect(sx + w/2 - 1, y + 2, 2, h - 4);
+        ctx.fillStyle = "#777";
+        ctx.fillRect(sx + 3, y + 3, 2, 2);
+        ctx.fillRect(sx + w - 6, y + h - 5, 2, 2);
+    }
+
+    if (type === ROCK_TYPE.SPIKED) {
+        ctx.fillStyle = "#8B6914";
+        for (let i = 0; i < w; i += 4) {
+            ctx.beginPath();
+            ctx.moveTo(sx + i, y + 2);
+            ctx.lineTo(sx + i + 2, y - 3);
+            ctx.lineTo(sx + i + 4, y + 2);
+            ctx.fill();
+        }
+        ctx.fillStyle = "#ff4444";
+        ctx.fillRect(sx + w/2 - 1, y + h/2, 2, 2);
+    }
+
+    if (type === ROCK_TYPE.CRUMBLING) {
+        ctx.fillStyle = "#4a3a2a";
+        ctx.fillRect(sx + w/2 - 1, y + 2, 2, h - 4);
+        ctx.fillRect(sx + 3, y + h/2 - 1, w - 6, 2);
+        ctx.fillStyle = "#8a7a4a";
+        ctx.fillRect(sx + w/2 - 2, y + h/2 - 2, 4, 3);
+        if (Math.sin(timer * 0.15) > 0) {
+            ctx.fillStyle = "#ff6644";
+            ctx.fillRect(sx + 2, y + 2, 2, 2);
+            ctx.fillRect(sx + w - 5, y + 3, 2, 2);
+        }
+    }
+
+    if (type === ROCK_TYPE.MOVING) {
+        ctx.fillStyle = "#668866";
+        ctx.fillRect(sx + 2, y + h/2 - 1, 3, 2);
+        ctx.fillRect(sx + w - 5, y + h/2 - 1, 3, 2);
+        ctx.fillStyle = "#445544";
+        ctx.fillRect(sx + w/2 - 1, y + 2, 2, h - 4);
+    }
+}
+
+/* =========================
+   宝箱系统
+========================= */
+let treasures = [];
+
+function drawTreasure(x, y) {
+    let sx = getScreenX(x);
+    let sy = y;
+
+    ctx.fillStyle = "#DAA520";
+    ctx.fillRect(sx, sy, 16, 12);
+    ctx.strokeStyle = "#B8860B";
+    ctx.strokeRect(sx, sy, 16, 12);
+    ctx.fillStyle = "#B8860B";
+    ctx.fillRect(sx + 2, sy + 4, 12, 4);
+    ctx.fillStyle = "#8B6914";
+    ctx.beginPath();
+    ctx.arc(sx + 8, sy + 9, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#FFD700";
+    ctx.fillRect(sx + 1, sy + 1, 3, 2);
+    if (Math.sin(Date.now() * 0.008) > 0.5) {
+        ctx.fillStyle = "#FFD700";
+        ctx.fillRect(sx + 6, sy - 2, 4, 2);
+        ctx.fillRect(sx + 4, sy - 4, 2, 2);
+        ctx.fillRect(sx + 10, sy - 4, 2, 2);
+    }
+}
+
+function checkTreasureCollision() {
+    for (let i = treasures.length - 1; i >= 0; i--) {
+        let t = treasures[i];
+        if (
+            player.x < t.x + 16 &&
+            player.x + player.width > t.x &&
+            player.y < t.y + 12 &&
+            player.y + player.height > t.y
+        ) {
+            treasures.splice(i, 1);
+            treasureCount++;
+            treasureText.innerText = "宝箱：" + treasureCount;
+        }
+    }
+}
+
+/* =========================
+   沙虫
+========================= */
+let worms = [];
+
+function spawnWorm(side) {
+    let wormX;
+    if (side === "left") {
+        wormX = cameraX - 40;
+    } else {
+        wormX = cameraX + canvas.width + 40;
+    }
+
+    worms.push({
+        x: wormX,
+        y: groundY,
+        phase: "up",
+        timer: 0,
+        vy: -3,
+        side: side,
+        segments: [
+            { x:0, y:0, w: 16, h: 14 },
+            { x: 16, y: -2, w: 14, h: 12 },
+            { x: 28, y: -4, w: 12, h: 10 }
+        ],
+        eyeBlink: 0
+    });
+}
+
+function updateWorms() {
+    for (let i = worms.length - 1; i >= 0; i--) {
+        let w = worms[i];
+        w.timer++;
+
+        if (w.phase === "up") {
+            w.vy = -3;
+            if (w.timer > 25) {
+                w.phase = "stay";
+                w.vy = 0;
+                w.timer = 0;
+            }
+        }
+
+        if (w.phase === "stay") {
+            w.vy = 0;
+            w.eyeBlink++;
+            if (w.timer > 50) {
+                w.phase = "down";
+                w.vy = 2;
+                w.timer = 0;
+            }
+        }
+
+        if (w.phase === "down") {
+            w.vy = 2;
+            if (w.y >= groundY) {
+                worms.splice(i, 1);
+                continue;
+            }
+        }
+
+        w.y += w.vy;
+
+        let sx = getScreenX(w.x);
+        let sy = w.y;
+
+        let visibleSegments = w.phase === "up" ?
+            Math.min(3, Math.floor(w.timer / 8) + 1) :
+            (w.phase === "down" ?
+                Math.max(0, 3 - Math.floor(w.timer / 8)) : 3);
+
+        for (let s = 0; s < visibleSegments; s++) {
+            let seg = w.segments[s];
+            let segX = sx + seg.x;
+            let segY = sy + seg.y;
+
+            if (s === 0) ctx.fillStyle = "#8B6914";
+            else if (s === 1) ctx.fillStyle = "#654321";
+            else ctx.fillStyle = "#4a3020";
+
+            ctx.fillRect(segX, segY, seg.w, seg.h);
+
+            ctx.fillStyle = s === 0 ? "#9b7a20" : "#553322";
+            ctx.fillRect(segX + 2, segY + 2, seg.w - 4, 2);
+            ctx.fillRect(segX + 4, segY + 6, seg.w - 8, 2);
+
+            if (s === 0) {
+                ctx.fillStyle = "#1a1a2e";
+                let eyeOffset = (Math.sin(w.eyeBlink * 0.1) > 0.8) ? 0 : 2;
+                ctx.fillRect(segX + 4, segY + 3, 3, 3 - eyeOffset);
+                ctx.fillRect(segX + 9, segY + 3, 3, 3 - eyeOffset);
+
+                ctx.fillStyle = "#3a1a0a";
+                ctx.fillRect(segX + 5, segY + 8, 6, 2);
+
+                ctx.fillStyle = "#fff";
+                ctx.fillRect(segX + 6, segY + 8, 2, 2);
+                ctx.fillRect(segX + 9, segY + 8, 2, 2);
+            }
+        }
+
+        for (let s = 0; s < visibleSegments - 1; s++) {
+            let seg1 = w.segments[s];
+            let connX = sx + seg1.x + seg1.w;
+            let connY = sy + seg1.y + seg1.h / 2 - 2;
+            ctx.fillStyle = "#654321";
+            ctx.fillRect(connX - 2, connY, 4, 4);
+        }
+
+        let wormHead = { x: w.x, y: w.y, width: 16, height: 14 };
+
+        if (
+            player.x < wormHead.x + wormHead.width &&
+            player.x + player.width > wormHead.x &&
+            player.y < wormHead.y + wormHead.height &&
+            player.y + player.height > wormHead.y
+        ) {
+            gameOver();
+        }
+    }
+}
+
+/* =========================
+   统一物体系统
+========================= */
+let objects = [];
+let platformCooldown = 0;
+let arrowCooldown = 0;
+const PLATFORM_COOLDOWN = 80;
+const ARROW_COOLDOWN = 120;
+const MIN_PLATFORM_DISTANCE = 160;
+const SPAWN_AHEAD = 200;
+
+function hasNearbyObject(side, minDistance) {
+    for (let o of objects) {
+        if (o.side !== side) continue;
+        let refX = side === "left" ? cameraX : cameraX + canvas.width;
+        let dist = Math.abs(o.x - refX);
+        if (dist < minDistance) return true;
+    }
+    return false;
+}
+
+function checkPlatformOverlap(px, pw) {
+    for (let o of objects) {
+        if (o.type !== "platform") continue;
+        if (px < o.x + o.w + 20 && px + pw + 20 > o.x) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function spawnObject() {
+    if (platformCooldown > 0 || arrowCooldown > 0) return;
+
+    const r = Math.random();
+
+    if (r < 0.4) {
+        let side = Math.random() < 0.5 ? "left" : "right";
+
+        if (hasNearbyObject(side, MIN_PLATFORM_DISTANCE)) return;
+
+        let px;
+        if (side === "left") {
+            px = cameraX - SPAWN_AHEAD;
+        } else {
+            px = cameraX + canvas.width + SPAWN_AHEAD;
+        }
+
+        let py = [240, 270, 300][Math.floor(Math.random() * 3)];
+        let pw = 80 + Math.random() * 40;
+        let ph = 20;
+
+        if (checkPlatformOverlap(px, pw)) return;
+
+        let obj = {
+            type: "platform",
+            x: px,
+            y: py,
+            w: pw,
+            h: ph,
+            side: side,
+            rocks: []
+        };
+
+        if (Math.random() < 0.7) {
+            let rockCount = 1 + Math.floor(Math.random() * 3);
+            let types = [ROCK_TYPE.SMALL, ROCK_TYPE.LARGE, ROCK_TYPE.SPIKED, ROCK_TYPE.CRUMBLING, ROCK_TYPE.MOVING];
+
+            for (let t = 0; t < rockCount; t++) {
+                let type = types[Math.floor(Math.random() * types.length)];
+                let props = getRockProperties(type);
+
+                let rockX, rockY;
+                let attempts = 0;
+                do {
+                    rockX = px + Math.random() * (pw - props.width);
+                    rockY = py - props.height;
+                    attempts++;
+                } while (
+                    attempts < 10 &&
+                    obj.rocks.some(r => Math.abs(r.x - rockX) < 10)
+                );
+
+                if (attempts < 10) {
+                    obj.rocks.push({
+                        x: rockX,
+                        y: rockY,
+                        width: props.width,
+                        height: props.height,
+                        type: type,
+                        timer: 0,
+                        moveOffset: Math.random() * Math.PI * 2,
+                        crumbled: false
+                    });
+                }
+            }
+        }
+
+        if (Math.random() < 0.5) {
+            let tx = px + 10 + Math.random() * (pw - 36);
+            let ty = py - 18;
+            treasures.push({ x: tx, y: ty });
+        }
+
+        objects.push(obj);
+        platformCooldown = PLATFORM_COOLDOWN;
+        return;
+    }
+
+    if (r < 0.7) {
+        let side = Math.random() < 0.5 ? "left" : "right";
+
+        if (hasNearbyObject(side, 200)) return;
+
+        let ax;
+        let avx;
+        if (side === "left") {
+            ax = cameraX - SPAWN_AHEAD;
+            avx = (4 + speed * 0.6);
+        } else {
+            ax = cameraX + canvas.width + SPAWN_AHEAD;
+            avx = -(4 + speed * 0.6);
+        }
+
+        objects.push({
+            type: "arrow",
+            x: ax,
+            y: 240 + Math.random() * 80,
+            vx: avx,
+            width: 40,
+            height: 10,
+            side: side
+        });
+        arrowCooldown = ARROW_COOLDOWN;
+    }
+}
+
+function handleCollision() {
+    for (let o of objects) {
+        if (o.type === "platform") {
+            const playerBottom = player.y + player.height;
+            if (
+                player.vy >= 0 &&
+                playerBottom - player.vy <= o.y + 5 &&
+                playerBottom >= o.y &&
+                player.x + player.width > o.x &&
+                player.x < o.x + o.w
+            ) {
+                player.y = o.y - player.height;
+                player.vy = 0;
+                jumpCount = 0;
+            }
+
+            for (let rock of o.rocks) {
+                if (rock.crumbled) continue;
+
+                const rockBottom = rock.y + rock.height;
+                if (
+                    player.vy >= 0 &&
+                    player.y + player.height - player.vy <= rockBottom + 5 &&
+                    player.y + player.height >= rockBottom &&
+                    player.x + player.width > rock.x &&
+                    player.x < rock.x + rock.width
+                ) {
+                    if (rock.type === ROCK_TYPE.CRUMBLING) {
+                        rock.crumbled = true;
+                        player.vy = -6;
+                        continue;
+                    }
+                    player.y = rock.y - player.height;
+                    player.vy = 0;
+                    jumpCount = 0;
+                }
+
+                if (rock.type === ROCK_TYPE.SPIKED) {
+                    if (
+                        player.x < rock.x + rock.width &&
+                        player.x + player.width > rock.x &&
+                        player.y < rock.y + rock.height &&
+                        player.y + player.height > rock.y &&
+                        player.vy >= 0
+                    ) {
+                        const playerBottom = player.y + player.height;
+                        if (playerBottom - player.vy > rock.y + 3) {
+                            gameOver();
+                        }
+                    }
+                }
+            }
+        }
+
+        if (o.type === "arrow") {
+            if (
+                player.x < o.x + o.width &&
+                player.x + player.width > o.x &&
+                player.y < o.y + o.height &&
+                player.y + player.height > o.y
+            ) {
+                gameOver();
+            }
+        }
+    }
+}
+
+function updateRocks() {
+    for (let o of objects) {
+        if (o.type !== "platform") continue;
+
+        for (let rock of o.rocks) {
+            rock.timer++;
+
+            if (rock.type === ROCK_TYPE.MOVING) {
+                let moveX = Math.sin(rock.timer * 0.1 + rock.moveOffset) * 3;
+                if (!rock._baseX) rock._baseX = rock.x;
+                rock.x = rock._baseX + moveX;
+            }
+        }
+    }
+}
+
+/* =========================
+   游戏控制
+========================= */
+function startGame() {
+    gameRunning = true;
+    survivalTime = 0;
+    treasureCount = 0;
+    speed = 2;
+    cameraX = 0;
+    objects = [];
+    treasures = [];
+    worms = [];
+    platformCooldown = 0;
+    arrowCooldown = 0;
+    isSprinting = false;
+    player.x = 400;
+    player.y = 280;
+    player.vy = 0;
+    jumpCount = 0;
+    moveDir = 0;
+    startOverlay.style.display = "none";
+    gameOverOverlay.style.display = "none";
+    treasureText.innerText = "宝箱：0";
+    updateSpeedStatus();
+}
+
+let bestTime = Number(localStorage.getItem("bestTime")) || 0;
+let bestTreasures = Number(localStorage.getItem("bestTreasures")) || 0;
+
+function gameOver() {
+    gameRunning = false;
+
+    if (survivalTime > bestTime) {
+        bestTime = survivalTime;
+        localStorage.setItem("bestTime", bestTime);
+    }
+
+    if (treasureCount > bestTreasures) {
+        bestTreasures = treasureCount;
+        localStorage.setItem("bestTreasures", bestTreasures);
+    }
+
+    gameOverOverlay.style.display = "flex";
+    currentTimeEl.textContent = "本次存活：" + survivalTime.toFixed(1) + " 秒";
+    currentTreasuresEl.textContent = "本次宝箱：" + treasureCount;
+    bestScoreEl.textContent = "最长存活：" + bestTime.toFixed(1) + " 秒";
+    bestTreasuresEl.textContent = "最多宝箱：" + bestTreasures;
+    timeText.innerText = "时间：0.0 秒";
+}
+
+/* =========================
+   ✅ 键盘（含加速键）
+   ========================= */
+startBtn.addEventListener("click", () => { startGame(); });
+restartBtn.addEventListener("click", () => { startGame(); });
+
+document.addEventListener("keydown", e => {
+    if (e.code === "Space") {
+        if (!gameRunning) { startGame(); return; }
+    }
+    if (gameRunning) {
+        if (e.code === "ArrowUp" && jumpCount < 2) {
+            player.vy = -12;
+            jumpCount++;
+        }
+
+        // ✅ 按下"下"键 → 切换加速
+        if (e.code === "ArrowDown") {
+            isSprinting = !isSprinting;
+            updateSpeedStatus();
+        }
+    }
+    if (e.code === "ArrowLeft") moveDir = -1;
+    if (e.code === "ArrowRight") moveDir = 1;
+});
+
+document.addEventListener("keyup", e => {
+    if (e.code === "ArrowLeft" || e.code === "ArrowRight") {
+        moveDir = 0;
+    }
+});
+
+/* =========================
+   主循环
+========================= */
+let lastTime = 0;
+
+function gameLoop(timestamp) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawPixelBackground();
+
+    if (!gameRunning) {
+        requestAnimationFrame(gameLoop);
+        return;
+    }
+
+    if (lastTime === 0) lastTime = timestamp;
+    let delta = (timestamp - lastTime) / 1000;
+    lastTime = timestamp;
+    survivalTime += delta;
+
+    speed = 2 + Math.floor(survivalTime / 10) * 0.2;
+
+    cameraX = player.x - canvas.width / 2 + player.width / 2;
+
+    player.vy += 0.6;
+    player.y += player.vy;
+
+    if (player.y + player.height >= groundY) {
+        player.y = groundY - player.height;
+        player.vy = 0;
+        jumpCount = 0;
+    }
+
+    // ✅ 使用动态速度
+    player.x += moveDir * getMoveSpeed();
+
+    if (platformCooldown > 0) platformCooldown--;
+    if (arrowCooldown > 0) arrowCooldown--;
+
+    if (Math.random() < 0.035) {
+        spawnObject();
+    }
+
+    if (Math.random() < 0.003) {
+        let side = Math.random() < 0.5 ? "left" : "right";
+        spawnWorm(side);
+    }
+
+    updateRocks();
+
+    for (let i = objects.length - 1; i >= 0; i--) {
+        let o = objects[i];
+
+        if (o.type === "platform") {
+            drawStonePlatform(o.x, o.y, o.w, o.h);
+            for (let rock of o.rocks) {
+                if (rock.crumbled) continue;
+                drawRock(rock.x, rock.y, rock.width, rock.height, rock.type, rock.timer);
+            }
+        }
+
+        if (o.type === "arrow") {
+            o.x += o.vx;
+            let sx = getScreenX(o.x);
+            ctx.fillStyle = "#e94560";
+            ctx.fillRect(sx, o.y, o.width, o.height);
+            ctx.fillStyle = "#ff6b6b";
+            if (o.side === "left") {
+                ctx.beginPath();
+                ctx.moveTo(sx, o.y + o.height / 2);
+                ctx.lineTo(sx + 10, o.y);
+                ctx.lineTo(sx + 10, o.y + o.height);
+                ctx.fill();
+            } else {
+                ctx.beginPath();
+                ctx.moveTo(sx + o.width, o.y + o.height / 2);
+                ctx.lineTo(sx + o.width - 10, o.y);
+                ctx.lineTo(sx + o.width - 10, o.y + o.height);
+                ctx.fill();
+            }
+        }
+
+        if (o.side === "left") {
+            if (o.x > cameraX + canvas.width + SPAWN_AHEAD + 100) {
+                objects.splice(i, 1);
+            }
+        } else {
+            if (o.x + (o.w || o.width) < cameraX - SPAWN_AHEAD - 100) {
+                objects.splice(i, 1);
+            }
+        }
+    }
+
+    for (let t of treasures) {
+        drawTreasure(t.x, t.y);
+    }
+    checkTreasureCollision();
+
+    for (let i = treasures.length - 1; i >= 0; i--) {
+        let t = treasures[i];
+        if (t.x < cameraX - SPAWN_AHEAD || t.x > cameraX + canvas.width + SPAWN_AHEAD) {
+            treasures.splice(i, 1);
+        }
+    }
+
+    updateWorms();
+    handleCollision();
+    drawPlayer();
+
+    timeText.innerText = "时间：" + survivalTime.toFixed(1) + " 秒";
+
+    requestAnimationFrame(gameLoop);
+}
+
+initSky();
+requestAnimationFrame(gameLoop);
+</script>
+
+</body>
+</html>
